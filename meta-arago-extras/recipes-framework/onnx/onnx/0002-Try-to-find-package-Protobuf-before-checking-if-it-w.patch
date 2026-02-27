@@ -1,25 +1,29 @@
-From 7e118775c120ec802d13ac3e0125d726323aee87 Mon Sep 17 00:00:00 2001
-From: Andrew Davis <afd@ti.com>
-Date: Thu, 16 Jan 2025 11:44:56 -0600
-Subject: [PATCH] Try to find package Protobuf before checking if it was found
+From c486b6fc7f3f23240a278ef4da91d208c06a4735 Mon Sep 17 00:00:00 2001
+From: Pratham Deshmukh <p-deshmukh@ti.com>
+Date: Thu, 12 Feb 2026 17:23:40 +0530
+Subject: [PATCH 2/5] Try to find package Protobuf before checking if it was
+ found
 
 Upstream-Status: Pending
 
-Signed-off-by: Andrew Davis <afd@ti.com>
+Signed-off-by: Pratham Deshmukh <p-deshmukh@ti.com>
 ---
  CMakeLists.txt | 2 ++
  1 file changed, 2 insertions(+)
 
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index b666eec4..f6fbf159 100644
+index 8593fe4a3..9fed84add 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -127,6 +127,8 @@ if(ONNX_BUILD_TESTS)
+@@ -142,6 +142,8 @@ if(ONNX_BUILD_TESTS)
    set(googletest_STATIC_LIBRARIES GTest::gtest)
  endif()
-
+ 
 +find_package(Protobuf)
 +
+ if(NOT ONNX_BUILD_CUSTOM_PROTOBUF)
  if((ONNX_USE_LITE_PROTO AND TARGET protobuf::libprotobuf-lite) OR ((NOT ONNX_USE_LITE_PROTO) AND TARGET protobuf::libprotobuf))
    # Sometimes we need to use protoc compiled for host architecture while linking
-   # libprotobuf against target architecture. See https://github.com/caffe2/caffe
+-- 
+2.34.1
+
