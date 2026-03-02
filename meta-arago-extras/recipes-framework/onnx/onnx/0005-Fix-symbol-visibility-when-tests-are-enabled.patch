@@ -1,4 +1,4 @@
-From 20751f4daf96566edc3b503c0e697f01f2b97263 Mon Sep 17 00:00:00 2001
+From b745ae1fed1e0819cac764a07d8f82abc1c438da Mon Sep 17 00:00:00 2001
 From: Pratham Deshmukh <p-deshmukh@ti.com>
 Date: Thu, 12 Feb 2026 17:27:17 +0530
 Subject: [PATCH 5/5] Fix symbol visibility when tests are enabled

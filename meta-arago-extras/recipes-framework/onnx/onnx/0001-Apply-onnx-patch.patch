@@ -1,9 +1,16 @@
-From 60040ccdb6b059ada3d188bb42b98a424c3e4c27 Mon Sep 17 00:00:00 2001
+From 93894db295857ca77cf385a5d39c565ee3e0c2fd Mon Sep 17 00:00:00 2001
 From: Pratham Deshmukh <p-deshmukh@ti.com>
 Date: Thu, 12 Feb 2026 17:22:13 +0530
-Subject: [PATCH 1/5] Patch onnx.patch apply
+Subject: [PATCH 1/5] Apply onnx patch
 
-Applying the patch as mentioned in [0]
+ONNXRuntime's CMake uses FetchContent to download ONNX as a dependency.
+Our onnxruntime recipe uses FETCHCONTENT_FULLY_DISCONNECTED=ON so instead
+of letting ONNXRuntime fetch ONNX, we build ONNX separately using the
+onnx_1.18.0.bb recipe.The onnxruntime recipe then references the pre-built
+ONNX from the sysroot. Since ONNX was built separately without the patch,
+the fixes that ONNXRuntime expects are missing
+
+We need to apply the patch [0] separately to avoid errors.
 
 [0] https://github.com/microsoft/onnxruntime/blob/rel-1.23.2/cmake/patches/onnx/onnx.patch
 

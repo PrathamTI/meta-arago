@@ -1,8 +1,15 @@
-From c486b6fc7f3f23240a278ef4da91d208c06a4735 Mon Sep 17 00:00:00 2001
+From b6628fa7ee3acd35076d617157342b25c432715b Mon Sep 17 00:00:00 2001
 From: Pratham Deshmukh <p-deshmukh@ti.com>
 Date: Thu, 12 Feb 2026 17:23:40 +0530
-Subject: [PATCH 2/5] Try to find package Protobuf before checking if it was
- found
+Subject: [PATCH 2/5] cmake: Fix Protobuf target check by calling find_package
+ first
+
+Add find_package(Protobuf) before checking if protobuf targets exist
+in the ONNX_BUILD_CUSTOM_PROTOBUF conditional. This ensures Protobuf
+targets are properly defined before being referenced.
+
+Without this change, the target existence checks fails even when
+Protobuf is available.
 
 Upstream-Status: Pending
 

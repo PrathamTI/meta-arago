@@ -1,10 +1,16 @@
-From 5bd00f4cbb75d256bcae9c7960ffa6efbae615d6 Mon Sep 17 00:00:00 2001
+From 6ce0573c3661424c5723f9bab6773a3f6ede79fd Mon Sep 17 00:00:00 2001
 From: Pratham Deshmukh <p-deshmukh@ti.com>
 Date: Thu, 12 Feb 2026 17:24:56 +0530
-Subject: [PATCH 3/5] Do not re-export internal targets directories
+Subject: [PATCH 3/5] cmake: Remove Protobuf directory exports from config
+ template
 
-These can be specific to a given project build and should not
-be automatically inherited to dependent projects.
+Remove CMAKE_PREFIX_PATH and Protobuf_INCLUDE_DIR exports from
+ONNXConfig.cmake.in as these paths are specific to the ONNX build
+environment and should not be propagated to dependent projects.
+
+Dependent projects should find Protobuf through their own
+find_package(Protobuf REQUIRED) call instead of inheriting
+build-specific paths.
 
 Upstream-Status: Pending
 

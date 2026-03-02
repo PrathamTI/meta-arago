@@ -1,4 +1,4 @@
-From fbab44408209f8411be3c81bd143f77738429bef Mon Sep 17 00:00:00 2001
+From 8e19cae53e24126cb57e486e0e7da96f02b3cbf7 Mon Sep 17 00:00:00 2001
 From: Pratham Deshmukh <p-deshmukh@ti.com>
 Date: Thu, 12 Feb 2026 17:26:07 +0530
 Subject: [PATCH 4/5] Linker failed when trying to create the final onnx_gtests
