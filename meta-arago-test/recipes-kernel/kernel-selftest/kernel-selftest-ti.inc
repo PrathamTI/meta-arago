@@ -46,4 +46,8 @@ TEST_LIST += "\
     watchdog \
 "
 
+TEST_LIST:append:bsp-ti-6_18 = " \
+    pci_endpoint \
+"
+
 INSANE_SKIP:${PN} += "staticdev textrel"
