@@ -30,6 +30,8 @@ UTILS = " \
 	 phytool \
 "
 
+UTILS:remove:bsp-ti-6_18 = "pcitest"
+
 UTILS:append:ti-soc = " \
     mtd-utils-ubifs-tests \
 "

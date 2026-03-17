@@ -51,6 +51,8 @@ TI_TEST_BASE = "\
     stress-ng \
 "
 
+TI_TEST_BASE:remove:bsp-ti-6_18 = "pcitest"
+
 TI_TEST_BASE:append:armv7a = " \
     cpuburn-neon \
 "
