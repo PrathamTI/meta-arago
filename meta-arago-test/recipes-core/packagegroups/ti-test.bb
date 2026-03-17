@@ -71,6 +71,7 @@ TI_TEST_EXTRAS_OPENCL = " \
 "
 
 TI_TEST_EXTRAS = " \
+    libsdl2-tests \
     python3-pillow \
     pytesseract \
     python3-numpy \
