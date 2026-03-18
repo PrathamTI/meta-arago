@@ -1,0 +1,41 @@
+From a5f962b51431ac19c264b8b9baa78ff283a77efe Mon Sep 17 00:00:00 2001
+From: Pratham Deshmukh <p-deshmukh@ti.com>
+Date: Tue, 10 Mar 2026 15:23:05 +0530
+Subject: [PATCH] fix: Remove absolute build paths from generated test files
+
+Replace meson.build_root() with relative paths in custom_filter_path
+to prevent Yocto buildpaths QA errors. The generated unittest files
+were embedding absolute build directory paths (e.g., /tmp/work/...)
+as string literals, which Yocto's QA system correctly flags as a
+build reproducibility issue.
+
+The runtime code already handles proper path resolution using
+NNSTREAMER_SOURCE_ROOT_PATH environment variable or relative
+fallbacks, so this change maintains full functionality
+while eliminating embedded build paths.
+
+Fixes: QA Issue "contains reference to TMPDIR [buildpaths]" in
+unittest_tizen_custom.cc and unittest_tizen_custom-set.cc
+
+Upstream-Status: Inappropriate [oe-specific]
+
+Signed-off-by: Pratham Deshmukh <p-deshmukh@ti.com>
+---
+ tests/nnstreamer_filter_extensions_common/meson.build | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tests/nnstreamer_filter_extensions_common/meson.build b/tests/nnstreamer_filter_extensions_common/meson.build
+index ecd1878b..ba72ee20 100644
+--- a/tests/nnstreamer_filter_extensions_common/meson.build
++++ b/tests/nnstreamer_filter_extensions_common/meson.build
+@@ -9,7 +9,7 @@ tizen_apptest_deps = [
+ # Format for adding subplugin into extensions -
+ # [name, extension abbreviation, dependencies, model file name/folder path/file path, test name]
+ extensions = []
+-custom_filter_path = join_paths(meson.build_root(), 'tests', 'nnstreamer_example',
++custom_filter_path = join_paths('tests', 'nnstreamer_example',
+     'libnnstreamer_customfilter_passthrough.' + so_ext)
+ extensions += [['custom', 'custom', nnstreamer_unittest_deps, custom_filter_path, 'custom']]
+ extensions += [['custom', 'custom', nnstreamer_unittest_deps, custom_filter_path, 'custom-set']]
+--
+2.34.1

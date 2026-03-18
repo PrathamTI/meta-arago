@@ -3,7 +3,11 @@ DESCRIPTION = "NNStreamer is a set of Gstreamer plugins that allow Gstreamer dev
 LICENSE = "LGPL-2.1-only"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=c25e5c1949624d71896127788f1ba590"
 
-SRC_URI = "git://github.com/nnstreamer/nnstreamer.git;branch=main;protocol=https"
+SRC_URI = " \
+	git://github.com/nnstreamer/nnstreamer.git;branch=main;protocol=https \
+	file://0001-fix-Remove-absolute-build-paths-from-generated-test-.patch \
+"
+
 SRCREV = "b970e9eff6bfb4e915463842422fe14bb2e53f84"
 
 # Only compatible with armv7a, armv7ve, and aarch64
@@ -62,7 +66,6 @@ FILES:${PN}-tests += "\
 	${libdir}/nnstreamer/customfilters/* \
 	${bindir}/unittest-nnstreamer/* \
 "
-INSANE_SKIP:${PN}-tests += "buildpaths"
 
 FILES:${PN}-dev = "\
 	${includedir}/nnstreamer/* \
