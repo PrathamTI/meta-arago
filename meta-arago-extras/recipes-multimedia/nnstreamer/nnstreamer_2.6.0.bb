@@ -60,6 +60,8 @@ FILES:${PN} += "\
 "
 INSANE_SKIP:${PN} += "dev-so"
 
+RDEPENDS:${PN}-tests = "nnstreamer"
+
 PACKAGES =+ "${PN}-tests"
 
 FILES:${PN}-tests += "\
