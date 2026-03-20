@@ -9,6 +9,7 @@ inherit packagegroup
 GFX_WAYLAND = "\
     ${@bb.utils.contains('DISTRO_FEATURES', 'pam', "weston-init", '', d)} \
     ${@bb.utils.contains('DISTRO_FEATURES', 'pam', "weston-examples", '', d)} \
+    mesa-demos \
 "
 
 OPENGL_PKGS = "\
