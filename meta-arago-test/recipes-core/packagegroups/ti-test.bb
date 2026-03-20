@@ -71,13 +71,16 @@ TI_TEST_EXTRAS_OPENCL = " \
 "
 
 TI_TEST_EXTRAS = " \
-    libsdl2-tests \
     python3-pillow \
     pytesseract \
     python3-numpy \
     python3-requests \
     python3-websocket-client \
     ${@bb.utils.contains('DISTRO_FEATURES', 'opencl', '${TI_TEST_EXTRAS_OPENCL}', '', d)} \
+"
+
+TI_TEST_EXTRAS:append:ti-soc = " \
+    libsdl2-tests \
 "
 
 TI_TEST_GRAPHICS_OPENGL = " \
