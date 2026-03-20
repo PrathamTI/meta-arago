@@ -15,7 +15,7 @@ OPENGL_DEV = "\
 
 WAYLAND_DEV = "\
     wayland-dev \
-    weston-dev \
+    ${@bb.utils.contains('DISTRO_FEATURES', 'pam', "weston-dev", '', d)} \
 "
 
 RDEPENDS:${PN} = "\

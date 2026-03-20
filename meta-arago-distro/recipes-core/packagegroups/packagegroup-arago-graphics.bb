@@ -7,8 +7,8 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 inherit packagegroup
 
 GFX_WAYLAND = "\
-    weston-init \
-    weston-examples \
+    ${@bb.utils.contains('DISTRO_FEATURES', 'pam', "weston-init", '', d)} \
+    ${@bb.utils.contains('DISTRO_FEATURES', 'pam', "weston-examples", '', d)} \
 "
 
 OPENGL_PKGS = "\
