@@ -8,6 +8,7 @@ SRC_URI:append = " \
     file://30-wlan.network \
     file://60-usb.network \
     file://timesyncd.conf \
+    file://systemd-networkd-wait-online.service \
 "
 
 do_install:append() {
@@ -27,6 +28,9 @@ do_install:append() {
 
     install -d ${D}${sysconfdir}/systemd/
     install -m 0644 ${UNPACKDIR}/timesyncd.conf ${D}${sysconfdir}/systemd/
+
+    # Install systemd-networkd-wait-online with --any flag for faster boot
+    install -m 0644 ${UNPACKDIR}/systemd-networkd-wait-online.service ${D}${systemd_system_unitdir}/
 
     # Remove new prompt code that is polluting the testing output
     rm ${D}/${nonarch_libdir}/tmpfiles.d/20-systemd-osc-context.conf
