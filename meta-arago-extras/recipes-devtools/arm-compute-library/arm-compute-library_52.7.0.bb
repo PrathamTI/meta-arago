@@ -13,6 +13,7 @@ SRC_URI = " \
     file://0006-Remove-TARGET-dependency.patch \
     file://0007-cmake-Generate-generic-library-name-instead-of.patch \
     file://0008-Add-FP16-source-path.patch \
+    file://0009-cmake-Exclude-AARCH64-specific-KleiDiAI-kernels-from.patch \
 "
 SRCREV = "c9a1fff898abd5109b759e8e16616519dc758fdd"
 

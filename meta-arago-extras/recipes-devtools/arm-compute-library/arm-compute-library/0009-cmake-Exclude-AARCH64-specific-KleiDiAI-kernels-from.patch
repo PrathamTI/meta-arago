@@ -1,0 +1,36 @@
+From 4e2bdad07af1a4a16264ef1373488f41fadd62ab Mon Sep 17 00:00:00 2001
+From: Pratham Deshmukh <p-deshmukh@ti.com>
+Date: Wed, 18 Mar 2026 20:55:08 +0530
+Subject: [PATCH] cmake: Exclude AARCH64-specific KleiDiAI kernels from armv7
+ builds
+
+The KleiDiAI matrix multiplication kernels use AARCH64-specific instructions
+that are incompatible with armv7 architecture.
+
+Update CMake and add expressions to conditionally exclude these files when
+ACL_ARCH_ISA is set to armv7, preventing build failures on 32-bit ARM platforms.
+
+Upstream-Status: Pending
+
+Signed-off-by: Pratham Deshmukh <p-deshmukh@ti.com>
+---
+ src/CMakeLists.txt | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index 0867ba81ad..45046fd0f1 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -361,8 +361,8 @@ set(ARM_COMPUTE_SVE2_SOURCES
+ )
+
+ set(ARM_COMPUTE_SOURCES
+-    ../third_party/kleidiai/kai/ukernels/matmul/matmul_clamp_f32_f32_f32p/kai_matmul_clamp_f32_f32_f32p8x1biasf32_6x8x4_neon_mla.c
+-	../third_party/kleidiai/kai/ukernels/matmul/pack/kai_rhs_pack_kxn_f32p8x1biasf32_f32_f32_neon.c
++	$<$<NOT:$<STREQUAL:${ACL_ARCH_ISA},armv7>>:../third_party/kleidiai/kai/ukernels/matmul/matmul_clamp_f32_f32_f32p/kai_matmul_clamp_f32_f32_f32p8x1biasf32_6x8x4_neon_mla.c>
++	$<$<NOT:$<STREQUAL:${ACL_ARCH_ISA},armv7>>:../third_party/kleidiai/kai/ukernels/matmul/pack/kai_rhs_pack_kxn_f32p8x1biasf32_f32_f32_neon.c>
+	c/AclContext.cpp
+	c/AclOperator.cpp
+	c/AclQueue.cpp
+--
+2.34.1
