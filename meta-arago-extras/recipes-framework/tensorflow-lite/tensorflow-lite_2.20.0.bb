@@ -17,6 +17,9 @@ SRC_URI = " \
     file://0001-Update-CMakeLists-for-building.patch \
     file://0002-Update-CMakeLists-for-building-shared-object.patch \
     file://0003-Fix-GStreamer-TensorFlow-Lite-pipeline-failures-due-.patch \
+    file://0004-Disable-xnnpack-delegate-target-operations-for-armv7.patch \
+    file://0005-Add-fp16-data-type-infrastructure-to-TensorFlow-Lite.patch \
+    file://0006-Add-float16-support-to-EMBEDDING_LOOKUP-kernel.patch \
     file://tensorflow2-lite.pc.in \
 "
 

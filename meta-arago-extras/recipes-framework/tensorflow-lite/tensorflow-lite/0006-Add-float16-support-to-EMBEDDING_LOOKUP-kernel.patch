@@ -1,0 +1,446 @@
+From 62b578947645562bd902b6a36e1841fb8c136aeb Mon Sep 17 00:00:00 2001
+From: Dillon Sharlet <dsharlet@google.com>
+Date: Tue, 24 Mar 2026 20:41:27 +0530
+Subject: [PATCH 6/6] Add float16 support to EMBEDDING_LOOKUP kernel
+
+This commit adds comprehensive float16 (half precision) support to the
+TensorFlow Lite EMBEDDING_LOOKUP operation, enabling more efficient
+inference on hardware that supports 16-bit floating point operations.
+
+Upstream-Status: Backport from dfc2c904c7ca3ea6749b1604bdda5877855e0582
+
+Signed-off-by: Pratham Deshmukh <p-deshmukh@ti.com>
+---
+ tensorflow/lite/kernels/embedding_lookup.cc   |  92 ++++++----
+ .../lite/kernels/embedding_lookup_test.cc     | 172 ++++++++++++++++--
+ 2 files changed, 210 insertions(+), 54 deletions(-)
+
+diff --git a/tensorflow/lite/kernels/embedding_lookup.cc b/tensorflow/lite/kernels/embedding_lookup.cc
+index e5ee8610..a54a3d93 100644
+--- a/tensorflow/lite/kernels/embedding_lookup.cc
++++ b/tensorflow/lite/kernels/embedding_lookup.cc
+@@ -33,11 +33,11 @@ limitations under the License.
+ #include <cstdint>
+ #include <cstring>
+
+-#include "fp16/fp16.h"  // from @FP16
+ #include "tensorflow/lite/c/c_api_types.h"
+ #include "tensorflow/lite/core/c/common.h"
+ #include "tensorflow/lite/kernels/internal/tensor_ctypes.h"
+ #include "tensorflow/lite/kernels/kernel_util.h"
++#include "tensorflow/lite/types/half.h"
+
+ namespace tflite {
+ namespace ops {
+@@ -75,7 +75,8 @@ TfLiteStatus Prepare(TfLiteContext* context, TfLiteNode* node) {
+       TF_LITE_ENSURE(context, value->type == kTfLiteUInt8 ||
+                                   value->type == kTfLiteInt8 ||
+                                   value->type == kTfLiteInt4);
+-      TF_LITE_ENSURE(context, output->type == kTfLiteFloat32);
++      TF_LITE_ENSURE(context, output->type == kTfLiteFloat32 ||
++                                  output->type == kTfLiteFloat16);
+       // Per-axis quantization must have quantized_dimension == 0 and correct
+       // sizes for scale and zero_point.
+       TF_LITE_ENSURE(context, qparams->quantized_dimension == 0);
+@@ -128,8 +129,12 @@ TfLiteStatus EvalSimple(TfLiteContext* context, TfLiteNode* node,
+   return kTfLiteOk;
+ }
+
+-void Unpack4Bit(double scaling_factor, int col_size, const int8_t* value_ptr,
+-                float* output_ptr) {
++template <typename T>
++void Unpack4Bit(float scaling_factor, int col_size, const int8_t* value_ptr,
++                T* output_ptr) {
++  float scaling_factor0 = scaling_factor / 16;
++  int j = 0;
++  int i4_idx = 0;
+   for (int j = 0; j < col_size; j++) {
+     int i8_idx = j;
+     int i4_idx = i8_idx / 2;
+@@ -163,7 +168,10 @@ TfLiteStatus EvalBlockwise(TfLiteContext* context, TfLiteNode* node,
+     col_size *= SizeOfDimension(value, i);
+   }
+
+-  float* output_ptr = GetTensorData<float>(output);
++  float* output_fp32_ptr =
++      output->type == kTfLiteFloat32 ? GetTensorData<float>(output) : nullptr;
++  half* output_fp16_ptr =
++      output->type == kTfLiteFloat16 ? GetTensorData<half>(output) : nullptr;
+   const int8_t* value_ptr = GetTensorData<int8_t>(value);
+   const int32_t* lookup_data = GetTensorData<int32_t>(lookup);
+
+@@ -191,14 +199,17 @@ TfLiteStatus EvalBlockwise(TfLiteContext* context, TfLiteNode* node,
+       return kTfLiteError;
+     }
+     for (int j = 0; j < num_blocks; ++j) {
+-      uint16_t raw_scaling_factor =
+-          GetTensorData<uint16_t>(&scale)[j + idx * num_blocks];
+-      uint32_t fp32_scaling_factor = fp16_ieee_to_fp32_bits(raw_scaling_factor);
+-      double scaling_factor = *reinterpret_cast<float*>(&fp32_scaling_factor);
+-
+-      Unpack4Bit(scaling_factor, blocksize,
+-                 &value_ptr[(j * blocksize + idx * col_size) / 2],
+-                 &output_ptr[j * blocksize + i * col_size]);
++      float scaling_factor = GetTensorData<half>(&scale)[j + idx * num_blocks];
++
++      if (output_fp32_ptr) {
++        Unpack4Bit(scaling_factor, blocksize,
++                   &value_ptr[(j * blocksize + idx * col_size) / 2],
++                   &output_fp32_ptr[j * blocksize + i * col_size]);
++      } else {
++        Unpack4Bit(scaling_factor, blocksize,
++                   &value_ptr[(j * blocksize + idx * col_size) / 2],
++                   &output_fp16_ptr[j * blocksize + i * col_size]);
++      }
+     }
+   }
+   return kTfLiteOk;
+@@ -207,9 +218,6 @@ TfLiteStatus EvalBlockwise(TfLiteContext* context, TfLiteNode* node,
+ TfLiteStatus EvalHybrid(TfLiteContext* context, TfLiteNode* node,
+                         const TfLiteTensor* lookup, const TfLiteTensor* value,
+                         TfLiteTensor* output) {
+-  if (value->quantization.type == kTfLiteBlockwiseQuantization) {
+-    return EvalBlockwise(context, node, lookup, value, output);
+-  }
+   const int row_size = SizeOfDimension(value, 0);
+
+   // col_size after we flatten tensor into 2D.
+@@ -218,7 +226,23 @@ TfLiteStatus EvalHybrid(TfLiteContext* context, TfLiteNode* node,
+     col_size *= SizeOfDimension(value, i);
+   }
+
+-  float* output_ptr = GetTensorData<float>(output);
++  auto copy_row = [&](float scaling_factor, auto output_ptr, auto value_ptr,
++                      int idx, int i) {
++    if (value->type == kTfLiteInt4) {
++      Unpack4Bit(scaling_factor, col_size, &value_ptr[idx * col_size / 2],
++                 &output_ptr[i * col_size]);
++    } else {
++      for (int j = 0; j < col_size; j++) {
++        output_ptr[j + i * col_size] =
++            value_ptr[j + idx * col_size] * scaling_factor;
++      }
++    }
++  };
++
++  float* output_fp32_ptr =
++      output->type == kTfLiteFloat32 ? GetTensorData<float>(output) : nullptr;
++  half* output_fp16_ptr =
++      output->type == kTfLiteFloat16 ? GetTensorData<half>(output) : nullptr;
+   const int8_t* value_ptr = GetTensorData<int8_t>(value);
+   const int32_t* lookup_data = GetTensorData<int32_t>(lookup);
+
+@@ -234,7 +258,7 @@ TfLiteStatus EvalHybrid(TfLiteContext* context, TfLiteNode* node,
+       // Dequantize embedding values.
+       // TODO(alanchiao): refactor scalar multiply into separate function
+       // for ease of adding a neon equivalent if ever necessary.
+-      double scaling_factor = value->params.scale;
++      float scaling_factor = value->params.scale;
+       if (value->quantization.type == kTfLiteAffineQuantization) {
+         const auto qparams = static_cast<const TfLiteAffineQuantization*>(
+             value->quantization.params);
+@@ -244,14 +268,10 @@ TfLiteStatus EvalHybrid(TfLiteContext* context, TfLiteNode* node,
+         }
+       }
+
+-      if (value->type == kTfLiteInt4) {
+-        Unpack4Bit(scaling_factor, col_size, &value_ptr[idx * col_size / 2],
+-                   &output_ptr[i * col_size]);
++      if (output_fp32_ptr) {
++        copy_row(scaling_factor, output_fp32_ptr, value_ptr, idx, i);
+       } else {
+-        for (int j = 0; j < col_size; j++) {
+-          output_ptr[j + i * col_size] =
+-              value_ptr[j + idx * col_size] * scaling_factor;
+-        }
++        copy_row(scaling_factor, output_fp16_ptr, value_ptr, idx, i);
+       }
+     }
+   }
+@@ -266,21 +286,13 @@ TfLiteStatus Eval(TfLiteContext* context, TfLiteNode* node) {
+   TF_LITE_ENSURE_OK(context, GetInputSafe(context, node, 1, &value));
+   TfLiteTensor* output;
+   TF_LITE_ENSURE_OK(context, GetOutputSafe(context, node, 0, &output));
+-  switch (value->type) {
+-    case kTfLiteFloat32:
+-      return EvalSimple(context, node, lookup, value, output);
+-    case kTfLiteInt4:
+-      return EvalHybrid(context, node, lookup, value, output);
+-    case kTfLiteUInt8:
+-    case kTfLiteInt8:
+-      if (output->type == kTfLiteFloat32) {
+-        return EvalHybrid(context, node, lookup, value, output);
+-      } else {
+-        return EvalSimple(context, node, lookup, value, output);
+-      }
+-    default:
+-      TF_LITE_KERNEL_LOG(context, "Type not currently supported.");
+-      return kTfLiteError;
++  if (value->quantization.type == kTfLiteBlockwiseQuantization) {
++    return EvalBlockwise(context, node, lookup, value, output);
++  } else if (value->type != output->type && (output->type == kTfLiteFloat32 ||
++                                             output->type == kTfLiteFloat16)) {
++    return EvalHybrid(context, node, lookup, value, output);
++  } else {
++    return EvalSimple(context, node, lookup, value, output);
+   }
+ }
+
+diff --git a/tensorflow/lite/kernels/embedding_lookup_test.cc b/tensorflow/lite/kernels/embedding_lookup_test.cc
+index 14091ab1..8530e629 100644
+--- a/tensorflow/lite/kernels/embedding_lookup_test.cc
++++ b/tensorflow/lite/kernels/embedding_lookup_test.cc
+@@ -27,11 +27,13 @@ License.
+ #include "tensorflow/lite/kernels/internal/tensor_ctypes.h"
+ #include "tensorflow/lite/kernels/test_util.h"
+ #include "tensorflow/lite/schema/schema_generated.h"
++#include "tensorflow/lite/types/half.h"
+
+ namespace tflite {
+ namespace {
+
+-float kTestTolerance = 7.41e-03;
++constexpr float kTestTolerance = 7.41e-03;
++constexpr float kFp16TestTolerance = 1e-02;
+
+ using ::testing::ElementsAreArray;
+
+@@ -125,8 +127,10 @@ class HybridEmbeddingLookupOpModel : public BaseEmbeddingLookupOpModel {
+  public:
+   HybridEmbeddingLookupOpModel(std::initializer_list<int> index_shape,
+                                std::initializer_list<int> weight_shape,
+-                               TensorType type)
+-      : BaseEmbeddingLookupOpModel(index_shape, weight_shape, type) {}
++                               TensorType weight_type,
++                               TensorType output_type = TensorType_FLOAT32)
++      : BaseEmbeddingLookupOpModel(index_shape, weight_shape, weight_type,
++                                   output_type) {}
+
+   void SetWeight(std::initializer_list<float> data) {
+     SymmetricQuantizeAndPopulate(weight_, data);
+@@ -143,9 +147,9 @@ class PerAxisHybridEmbeddingLookupOpModel : public BaseEmbeddingLookupOpModel {
+       std::initializer_list<int> index_shape,
+       std::initializer_list<int> weight_shape,
+       const std::vector<float>& per_channel_quantization_scales,
+-      TensorType type)
+-      : BaseEmbeddingLookupOpModel(index_shape, weight_shape, type,
+-                                   TensorType_FLOAT32,
++      TensorType weights_type, TensorType output_type = TensorType_FLOAT32)
++      : BaseEmbeddingLookupOpModel(index_shape, weight_shape, weights_type,
++                                   output_type,
+                                    per_channel_quantization_scales) {}
+
+   void SetSignedWeight(std::initializer_list<float> data) {
+@@ -155,12 +159,13 @@ class PerAxisHybridEmbeddingLookupOpModel : public BaseEmbeddingLookupOpModel {
+
+ class PerBlockHybridEmbeddingLookupOpModel : public BaseEmbeddingLookupOpModel {
+  public:
+-  PerBlockHybridEmbeddingLookupOpModel(std::initializer_list<int> index_shape,
+-                                       std::initializer_list<int> weight_shape,
+-                                       TensorType type, int blocksize,
+-                                       std::vector<float> scales)
+-      : BaseEmbeddingLookupOpModel(index_shape, weight_shape, type,
+-                                   TensorType_FLOAT32, scales, blocksize) {}
++  PerBlockHybridEmbeddingLookupOpModel(
++      std::initializer_list<int> index_shape,
++      std::initializer_list<int> weight_shape, TensorType weights_type,
++      int blocksize, std::vector<float> scales,
++      TensorType output_type = TensorType_FLOAT32)
++      : BaseEmbeddingLookupOpModel(index_shape, weight_shape, weights_type,
++                                   output_type, scales, blocksize) {}
+   void SetSignedWeight(std::initializer_list<float> data) {
+     PerBlockSymmetricQuantizeAndPopulate(weight_, data);
+   }
+@@ -168,8 +173,9 @@ class PerBlockHybridEmbeddingLookupOpModel : public BaseEmbeddingLookupOpModel {
+
+ // TODO(ahentz): write more tests that exercise the details of the op, such as
+ // lookup errors and variable input shapes.
+-TEST(EmbeddingLookupOpTest, SimpleTest) {
+-  EmbeddingLookupOpModel m({3}, {3, 2, 4});
++TEST(EmbeddingLookupOpTest, Float32) {
++  EmbeddingLookupOpModel m({3}, {3, 2, 4}, TensorType_FLOAT32,
++                           TensorType_FLOAT32);
+   m.SetInput({1, 0, 2});
+   m.Set3DWeightMatrix<float>(
+       [](int i, int j, int k) -> float { return i + j / 10.0f + k / 100.0f; });
+@@ -184,6 +190,25 @@ TEST(EmbeddingLookupOpTest, SimpleTest) {
+               })));
+ }
+
++TEST(EmbeddingLookupOpTest, Float16) {
++  EmbeddingLookupOpModel m({3}, {3, 2, 4}, TensorType_FLOAT16,
++                           TensorType_FLOAT16);
++  m.SetInput({1, 0, 2});
++  m.Set3DWeightMatrix<half>(
++      [](int i, int j, int k) -> half { return i + j / 10.0f + k / 100.0f; });
++
++  ASSERT_EQ(m.Invoke(), kTfLiteOk);
++
++  EXPECT_THAT(m.GetOutput<half>(),
++              ElementsAreArray(ArrayFloatNear(
++                  {
++                      1.00, 1.01, 1.02, 1.03, 1.10, 1.11, 1.12, 1.13,  // Row 1
++                      0.00, 0.01, 0.02, 0.03, 0.10, 0.11, 0.12, 0.13,  // Row 0
++                      2.00, 2.01, 2.02, 2.03, 2.10, 2.11, 2.12, 2.13,  // Row 2
++                  },
++                  kTestTolerance)));
++}
++
+ #if !defined(MEMORY_SANITIZER) && !defined(GOOGLE_UNSUPPORTED_OS_LOONIX) && \
+     defined(__LP64__)
+ TEST(EmbeddingLookupOpTest, LargeTableTest) {
+@@ -269,6 +294,28 @@ TEST(HybridEmbeddingLookupHybridOpTest, Simple4DTestUint8) {
+                   kTestTolerance)));
+ }
+
++TEST(HybridEmbeddingLookupHybridOpTest, Simple4DTestUint8Float16) {
++  HybridEmbeddingLookupOpModel m({3}, {3, 2, 2, 2}, TensorType_UINT8,
++                                 TensorType_FLOAT16);
++  m.SetInput({1, 0, 2});
++  m.SetWeight({
++      0.00, 0.01, 0.02, 0.03, 0.10, 0.11, 0.12, 0.13,  // Row 0
++      1.00, 1.01, 1.02, 1.03, 1.10, 1.11, 1.12, 1.13,  // Row 1
++      2.00, 2.01, 2.02, 2.03, 2.10, 2.11, 2.12, 2.13,  // Row 2
++  });
++
++  ASSERT_EQ(m.Invoke(), kTfLiteOk);
++
++  EXPECT_THAT(m.GetOutput<half>(),
++              ElementsAreArray(ArrayFloatNear(
++                  {
++                      1.00, 1.01, 1.02, 1.03, 1.10, 1.11, 1.12, 1.13,  // Row 1
++                      0.00, 0.01, 0.02, 0.03, 0.10, 0.11, 0.12, 0.13,  // Row 0
++                      2.00, 2.01, 2.02, 2.03, 2.10, 2.11, 2.12, 2.13,  // Row 2
++                  },
++                  kFp16TestTolerance)));
++}
++
+ TEST(HybridEmbeddingLookupHybridOpTest, Simple2DTestInt8) {
+   HybridEmbeddingLookupOpModel m({3}, {3, 8}, TensorType_INT8);
+   m.SetInput({1, 0, 2});
+@@ -332,6 +379,28 @@ TEST(HybridEmbeddingLookupHybridOpTest, Simple4DTestInt8) {
+                   kTestTolerance)));
+ }
+
++TEST(HybridEmbeddingLookupHybridOpTest, Simple4DTestInt8Float16) {
++  HybridEmbeddingLookupOpModel m({3}, {3, 2, 2, 2}, TensorType_INT8,
++                                 TensorType_FLOAT16);
++  m.SetInput({1, 0, 2});
++  m.SetSignedWeight({
++      0.00, 0.01,  0.02, 0.03, 0.10, 0.11, 0.12, 0.13,  // Row 0
++      1.00, -1.01, 1.02, 1.03, 1.10, 1.11, 1.12, 1.13,  // Row 1
++      2.00, 2.01,  2.02, 2.03, 2.10, 2.11, 2.12, 2.13,  // Row 2
++  });
++
++  ASSERT_EQ(m.Invoke(), kTfLiteOk);
++
++  EXPECT_THAT(m.GetOutput<half>(),
++              ElementsAreArray(ArrayFloatNear(
++                  {
++                      1.00, -1.01, 1.02, 1.03, 1.10, 1.11, 1.12, 1.13,  // Row 1
++                      0.00, 0.01,  0.02, 0.03, 0.10, 0.11, 0.12, 0.13,  // Row 0
++                      2.00, 2.01,  2.02, 2.03, 2.10, 2.11, 2.12, 2.13,  // Row 2
++                  },
++                  kFp16TestTolerance)));
++}
++
+ TEST(EmbeddingLookupHybridOpTest, Simple3DTestQuantized) {
+   EmbeddingLookupOpModel m({3}, {3, 2, 4}, TensorType_UINT8, TensorType_INT8);
+   m.SetInput({1, 0, 2});
+@@ -414,6 +483,29 @@ TEST(PerAxisHybridEmbeddingLookupHybridOpTest, PerAxisSimple4DTestInt8) {
+                   kTestTolerance)));
+ }
+
++TEST(PerAxisHybridEmbeddingLookupHybridOpTest, PerAxisSimple4DTestInt8Float16) {
++  PerAxisHybridEmbeddingLookupOpModel m({3}, {3, 2, 2, 2},
++                                        {0.00102, 0.0089, 0.016772},
++                                        TensorType_INT8, TensorType_FLOAT16);
++  m.SetInput({1, 0, 2});
++  m.SetSignedWeight({
++      0.00, 0.01,  0.02, 0.03, 0.10, 0.11, 0.12, 0.13,  // Row 0
++      1.00, -1.01, 1.02, 1.03, 1.10, 1.11, 1.12, 1.13,  // Row 1
++      2.00, 2.01,  2.02, 2.03, 2.10, 2.11, 2.12, 2.13,  // Row 2
++  });
++
++  ASSERT_EQ(m.Invoke(), kTfLiteOk);
++
++  EXPECT_THAT(m.GetOutput<half>(),
++              ElementsAreArray(ArrayFloatNear(
++                  {
++                      1.00, -1.01, 1.02, 1.03, 1.10, 1.11, 1.12, 1.13,  // Row 1
++                      0.00, 0.01,  0.02, 0.03, 0.10, 0.11, 0.12, 0.13,  // Row 0
++                      2.00, 2.01,  2.02, 2.03, 2.10, 2.11, 2.12, 2.13,  // Row 2
++                  },
++                  kFp16TestTolerance)));
++}
++
+ TEST(PerBlockHybridEmbeddingLookupHybridOpTest, PerBlockSimple2DTestInt4) {
+   PerBlockHybridEmbeddingLookupOpModel m(
+       /*index_shape=*/{3},
+@@ -441,6 +533,35 @@ TEST(PerBlockHybridEmbeddingLookupHybridOpTest, PerBlockSimple2DTestInt4) {
+           kTestTolerance)));
+ }
+
++TEST(PerBlockHybridEmbeddingLookupHybridOpTest,
++     PerBlockSimple2DTestInt4Float16) {
++  PerBlockHybridEmbeddingLookupOpModel m(
++      /*index_shape=*/{3},
++      /*weight_shape=*/{3, 8},
++      /*weights_type=*/TensorType_INT4,
++      /*blocksize=*/4,
++      /*scales=*/{0.001, 0.001, 0.02, 0.02, 0.3, 0.3},
++      /*output_type=*/TensorType_FLOAT16);
++  m.SetInput({1, 0, 2});
++  m.SetSignedWeight({
++      0.00, 0.007, 0.006, 0.005, 0.004, 0.003, 0.002, 0.001,  // Row 0
++      0.02, -0.02, 0.04,  0.06,  0.08,  -0.04, -0.08, -0.06,  // Row 1
++      0.3,  0.6,   0.9,   1.2,   1.5,   -0.3,  -0.6,  -0.9,   // Row 2
++  });
++
++  ASSERT_EQ(m.Invoke(), kTfLiteOk);
++
++  EXPECT_THAT(
++      m.GetOutput<half>(),
++      ElementsAreArray(ArrayFloatNear(
++          {
++              0.02, -0.02, 0.04,  0.06,  0.08,  -0.04, -0.08, -0.06,  // Row 1
++              0.00, 0.007, 0.006, 0.005, 0.004, 0.003, 0.002, 0.001,  // Row 0
++              0.3,  0.6,   0.9,   1.2,   1.5,   -0.3,  -0.6,  -0.9,   // Row 2
++          },
++          kFp16TestTolerance)));
++}
++
+ TEST(PerAxisHybridEmbeddingLookupHybridOpTest, PerAxisSimple2DTestInt4) {
+   PerAxisHybridEmbeddingLookupOpModel m(
+       /*index_shape=*/{3}, /*weight_shape=*/{3, 8},
+@@ -512,5 +633,28 @@ TEST(PerAxisHybridEmbeddingLookupHybridOpTest, PerAxisSimple4DTestInt4) {
+           kTestTolerance)));
+ }
+
++TEST(PerAxisHybridEmbeddingLookupHybridOpTest, PerAxisSimple4DTestInt4Float16) {
++  PerAxisHybridEmbeddingLookupOpModel m({3}, {3, 2, 2, 2}, {0.001, 0.02, 0.3},
++                                        TensorType_INT4, TensorType_FLOAT16);
++  m.SetInput({1, 0, 2});
++  m.SetSignedWeight({
++      0.00, 0.007, 0.006, 0.005, 0.004, 0.003, 0.002, 0.001,  // Row 0
++      0.02, -0.02, 0.04,  0.06,  0.08,  -0.04, -0.08, -0.06,  // Row 1
++      0.3,  0.6,   0.9,   1.2,   1.5,   -0.3,  -0.6,  -0.9,   // Row 2
++  });
++
++  ASSERT_EQ(m.Invoke(), kTfLiteOk);
++
++  EXPECT_THAT(
++      m.GetOutput<half>(),
++      ElementsAreArray(ArrayFloatNear(
++          {
++              0.02, -0.02, 0.04,  0.06,  0.08,  -0.04, -0.08, -0.06,  // Row 1
++              0.00, 0.007, 0.006, 0.005, 0.004, 0.003, 0.002, 0.001,  // Row 0
++              0.3,  0.6,   0.9,   1.2,   1.5,   -0.3,  -0.6,  -0.9,   // Row 2
++          },
++          kFp16TestTolerance)));
++}
++
+ }  // namespace
+ }  // namespace tflite
+--
+2.34.1

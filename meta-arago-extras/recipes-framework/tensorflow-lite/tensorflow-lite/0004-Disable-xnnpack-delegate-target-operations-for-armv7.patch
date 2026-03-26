@@ -1,0 +1,37 @@
+From ba13240ebc53a572edd984b8c223e39480bf45ee Mon Sep 17 00:00:00 2001
+From: Pratham Deshmukh <p-deshmukh@ti.com>
+Date: Fri, 20 Mar 2026 11:45:44 +0530
+Subject: [PATCH 4/6] Disable xnnpack-delegate target operations for armv7
+
+The xnnpack-delegate target is not built when XNNPACK is disabled
+for armv7, but CMake still tries to set compile options on it,
+causing configuration failures.
+
+Guard the target operations with target existence checks.
+
+Upstream-Status: Backport from 4f5e199a87e11ef4bb44992a3ccb22ea7e9fe983
+
+Signed-off-by: Pratham Deshmukh <p-deshmukh@ti.com>
+---
+ tensorflow/lite/CMakeLists.txt | 8 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/tensorflow/lite/CMakeLists.txt b/tensorflow/lite/CMakeLists.txt
+index 8c43fdac..4dbd519a 100644
+--- a/tensorflow/lite/CMakeLists.txt
++++ b/tensorflow/lite/CMakeLists.txt
+@@ -854,7 +854,9 @@ target_compile_options(_pywrap_tensorflow_interpreter_wrapper
+   PRIVATE ${TFLITE_TARGET_PRIVATE_OPTIONS}
+ )
+
+-target_compile_options(xnnpack-delegate
+-  PUBLIC ${TFLITE_TARGET_PUBLIC_OPTIONS}
+-  PRIVATE ${TFLITE_TARGET_PRIVATE_OPTIONS}
++if(TARGET xnnpack-delegate)
++  target_compile_options(xnnpack-delegate
++    PUBLIC ${TFLITE_TARGET_PUBLIC_OPTIONS}
++    PRIVATE ${TFLITE_TARGET_PRIVATE_OPTIONS}
+ )
++endif()
+--
+2.34.1
