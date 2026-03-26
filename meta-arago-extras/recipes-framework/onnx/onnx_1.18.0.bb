@@ -61,7 +61,7 @@ EXTRA_OECMAKE:append = " \
 	--log-level=VERBOSE \
 "
 
-inherit python3native cmake
+inherit python3targetconfig cmake
 
 python do_build_version_file() {
     import os
