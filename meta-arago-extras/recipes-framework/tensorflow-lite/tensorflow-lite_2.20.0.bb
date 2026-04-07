@@ -219,6 +219,10 @@ RDEPENDS:${PN} += " \
     ${PN}-tools \
     python3-${PN} \
 "
+FILES:${PN}-dev = " \
+    ${includedir}/* \
+    ${libdir}/lib*.so \
+"
 
 FILES:${PN} = " \
     ${libdir}/lib*.so* \
