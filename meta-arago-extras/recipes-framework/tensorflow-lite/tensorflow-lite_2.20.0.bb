@@ -213,11 +213,15 @@ do_install() {
             ${D}${libdir}/pkgconfig/tensorflow2-lite.pc
 }
 
-PACKAGES += "${PN}-tools python3-${PN}"
+PACKAGES += "${PN}-tools ${PN}-dev python3-${PN}"
 
 RDEPENDS:${PN} += " \
     ${PN}-tools \
     python3-${PN} \
+"
+
+FILES:${PN}-dev = " \
+    ${includedir}/* \
 "
 
 FILES:${PN} = " \
