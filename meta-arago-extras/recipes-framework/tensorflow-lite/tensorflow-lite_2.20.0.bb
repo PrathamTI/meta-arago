@@ -233,6 +233,10 @@ FILES:python3-${PN} = " \
     ${PYTHON_SITEPACKAGES_DIR}/tflite_runtime \
     ${PYTHON_SITEPACKAGES_DIR}/tflite_runtime.egg-info \
 "
+FILES:${PN}-dev += " \
+    ${includedir}/* \
+    ${libdir}/lib*.so \
+"
 
 RDEPENDS:python3-${PN} += " python3-ctypes python3-numpy "
 
